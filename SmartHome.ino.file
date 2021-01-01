@@ -1,0 +1,1503 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x3f, 20, 4);
+#include <EEPROM.h>
+#include <Servo.h>
+#include <Keypad.h>
+#include <SPI.h>
+#include <Ethernet.h>
+#include <SD.h>
+#define REQ_BUF_SZ   60
+
+File webFile;
+
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };   //physical mac address
+byte ip[] = { 192, 168, 1, 178 }; //Replace with static IP for Port Forwarding // ip in lan (that's what you need to use in your browser. ("192.168.1.178")
+byte gateway[] = { 192, 168, 1, 1 }; // internet access via router
+byte subnet[] = { 255, 255, 255, 0 };//subnet mask
+char HTTP_req[REQ_BUF_SZ] = {0}; // buffered HTTP request stored as null terminated string
+char req_index = 0;              // index into HTTP_req buffer
+EthernetServer server(80);   //server port
+String readString;
+
+//Variables
+int gateLightsButState = 0;
+int dangerButState = 0;
+int emergeButState = 0;
+int kitchenLightsButState = 0;
+int masterBedLightsButState = 0;
+int bedBLightsButState = 0;
+int bedGLightsButState = 0;
+int verandahLightsButState = 0;
+int storeLightsButState = 0;
+int livingLightsButState = 0;
+int garageLightsButState = 0;
+int backyardLightsButState = 0;
+int doorLightsButState = 0;
+int servoAngle;
+int character = 0;
+int activated = 0;
+int pauseButState;
+char Received = 'c';
+char Str[16] = {' ', ' ', ' ', ' ', ' ', ' ', '-', '*', '*', '*', ' ', ' ', ' ', ' ', ' ', ' '};
+
+//Pins
+Servo myservo;
+Servo myDoorServo;
+Servo win1;
+Servo win2;
+Servo win3;
+Servo win4;
+int emergeBut = 23;
+int doorLights = 24;
+int doorLightsBut = 25;
+int kitchenLights = 26;
+int kitchenLightsBut = 27;
+int storeLights = 28;
+int storeLightsBut = 29;
+int verandahLights = 30;
+int verandahLightsBut = 31;
+int garageLights = 32;
+int garageLightsBut = 33;
+int livingLights = 34;
+int livingLightsBut = 35;
+int backyardLights = 36;
+int backyardLightsBut = 37;
+int masterBedLights = 38;
+int masterBedLightsBut = 39;
+int bedBLights = 40;
+int bedBLightsBut = 41;
+int bedGLights = 42;
+int bedGLightsBut = 43;
+int dangerBut = 45;
+int floodLights = A0;
+int gateLightsBut = A1;
+int gateStatusLed = A2;
+int doorStatusLed = 49;
+int dcMotorSpeed = 13;
+int dcMotorClock = 11;
+int dcMotorAnti = 12;
+int pause = A3;
+
+//Keypad config
+const byte ROWS = 4; //four rows
+const byte COLS = 4; //four columns
+//define the cymbols on the buttons of the keypads
+char hexaKeys[ROWS][COLS] = {
+  {'1', '4', '7', '*'},
+  {'2', '5', '8', '0'},
+  {'3', '6', '9', '#'},
+  {'A', 'B', 'C', 'D'}
+};
+byte rowPins[ROWS] = {5, 4, 3, 2}; //connect to the row pinouts of the keypad
+byte colPins[COLS] = {9, 8, 7, 6}; //connect to the column pinouts of the keypad
+
+//initialize an instance of class NewKeypad
+Keypad customKeypad = Keypad( makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+void setup() {
+  Serial.begin(9600);
+  Serial.print("Initializing SD card...");
+  if (!SD.begin(4)) {
+    Serial.println("initialization failed!");
+    return;
+  }
+  Serial.println(" SD Card Initialization done.");
+  if (!SD.exists("smartHome.html")) {
+    Serial.println("ERROR - Can't find smartHome.html file!");
+    return;  // can't find index file
+  }
+  Serial.println("SUCCESS - Found smartHome.html file.");
+
+  myservo.attach(22);
+  myDoorServo.attach(48);
+  win1.attach(44);
+  win2.attach(A4);
+  win3.attach(46);
+  win4.attach(47);
+
+  Ethernet.begin(mac, ip, gateway, subnet);
+  server.begin();
+  Serial.print("server is at ");
+  Serial.println(Ethernet.localIP());
+  Serial.begin(9600);
+
+  pinMode(emergeBut, INPUT);
+  pinMode(dangerBut, INPUT);
+  pinMode(floodLights, OUTPUT);
+  pinMode(gateLightsBut, INPUT);
+  pinMode(doorLights, OUTPUT);
+  pinMode(doorLightsBut, INPUT);
+  pinMode(backyardLights, OUTPUT);
+  pinMode(backyardLightsBut, INPUT);
+  pinMode(storeLights, OUTPUT);
+  pinMode(storeLightsBut, INPUT);
+  pinMode(livingLights, OUTPUT);
+  pinMode(livingLightsBut, INPUT);
+  pinMode(garageLights, OUTPUT);
+  pinMode(garageLightsBut, INPUT);
+  pinMode(verandahLights, OUTPUT);
+  pinMode(verandahLightsBut, INPUT);
+  pinMode(kitchenLights, OUTPUT);
+  pinMode(kitchenLightsBut, INPUT);
+  pinMode(masterBedLights, OUTPUT);
+  pinMode(masterBedLightsBut, INPUT);
+  pinMode(bedBLights, OUTPUT);
+  pinMode(bedBLightsBut, INPUT);
+  pinMode(bedGLights, OUTPUT);
+  pinMode(bedGLightsBut, INPUT);
+  pinMode(gateStatusLed, OUTPUT);
+  pinMode(doorStatusLed, OUTPUT);
+  pinMode(dcMotorSpeed, OUTPUT);
+  pinMode(dcMotorClock, OUTPUT);
+  pinMode(dcMotorAnti, OUTPUT);
+  pinMode(10, OUTPUT);
+  digitalWrite(10, HIGH);
+  
+  if (EEPROM.read(17) == 2) {
+    toggleWin1();
+  } else if (EEPROM.read(17) == 1) {
+    toggleWin1();
+  }
+  if (EEPROM.read(18) == 2) {
+    toggleWin2();
+  } else if (EEPROM.read(18) == 1) {
+    toggleWin2();
+  }
+  if (EEPROM.read(19) == 2) {
+    toggleWin3();
+  } else if (EEPROM.read(19) == 1) {
+    toggleWin3();
+  }
+  if (EEPROM.read(20) == 2) {
+    toggleWin4();
+  } else if (EEPROM.read(20) == 1) {
+    toggleWin4();
+  }
+
+  if (EEPROM.read(2) == 1) {
+    stopGate();
+  }
+  if (EEPROM.read(13) == 1) {
+    myDoorServo.write(180);
+    delay(200);
+  }
+  else if (EEPROM.read(13) == 2) {
+    myDoorServo.write(0);
+    delay(200);
+  }
+  if (EEPROM.read(14) == 1) {
+    danger();
+    delay(200);
+  }
+  else if (EEPROM.read(14) == 2) {
+    digitalWrite(dangerButState, LOW);
+    delay(200);
+  }
+  if (EEPROM.read(1) == 1) {
+    digitalWrite(floodLights, HIGH);
+  } else if (EEPROM.read(1) == 2) {
+    digitalWrite(floodLights, LOW);
+  }
+  if (EEPROM.read(3) == 1) {
+    digitalWrite(doorLights, HIGH);
+  } else if (EEPROM.read(3) == 2) {
+    digitalWrite(doorLights, LOW);
+  }
+  if (EEPROM.read(4) == 1) {
+    digitalWrite(garageLights, HIGH);
+  } else if (EEPROM.read(4) == 2) {
+    digitalWrite(garageLights, LOW);
+  }
+  if (EEPROM.read(5) == 1) {
+    digitalWrite(livingLights, HIGH);
+  } else if (EEPROM.read(5) == 2) {
+    digitalWrite(livingLights, LOW);
+  }
+  if (EEPROM.read(6) == 1) {
+    digitalWrite(storeLights, HIGH);
+  } else if (EEPROM.read(6) == 2) {
+    digitalWrite(storeLights, LOW);
+  }
+  if (EEPROM.read(7) == 1) {
+    digitalWrite(verandahLights, HIGH);
+  } else if (EEPROM.read(7) == 2) {
+    digitalWrite(verandahLights, LOW);
+  }
+  if (EEPROM.read(8) == 1) {
+    digitalWrite(kitchenLights, HIGH);
+  } else if (EEPROM.read(8) == 2) {
+    digitalWrite(kitchenLights, LOW);
+  }
+  if (EEPROM.read(9) == 1) {
+    digitalWrite(backyardLights, HIGH);
+  } else if (EEPROM.read(9) == 2) {
+    digitalWrite(backyardLights, LOW);
+  }
+  if (EEPROM.read(10) == 1) {
+    digitalWrite(masterBedLights, HIGH);
+  } else if (EEPROM.read(10) == 2) {
+    digitalWrite(masterBedLights, LOW);
+  }
+  if (EEPROM.read(11) == 1) {
+    digitalWrite(bedBLights, HIGH);
+  } else if (EEPROM.read(11) == 2) {
+    digitalWrite(bedBLights, LOW);
+  }
+  if (EEPROM.read(12) == 1) {
+    digitalWrite(bedGLights, HIGH);
+  } else if (EEPROM.read(12) == 2) {
+    digitalWrite(bedGLights, LOW);
+  }
+
+  digitalWrite(dcMotorClock, HIGH);
+  digitalWrite(dcMotorAnti, HIGH);
+  analogWrite(dcMotorSpeed, 0);
+  delay(1000);
+  digitalWrite(gateStatusLed, HIGH);
+  digitalWrite(doorStatusLed, HIGH);
+  delay(1000);
+  digitalWrite(gateStatusLed, LOW);
+  digitalWrite(doorStatusLed, LOW);
+  delay(1000);
+  //Init the screen and print the first text
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.print("    PASSWORD");
+  lcd.setCursor(0, 1);
+  lcd.print("-***     ");
+  //put the servo in the close position first
+  //myservo.write(0);
+  //myDoorServo.write(0);
+}
+void bedBLightsOn() {
+  if (EEPROM.read(11) == 2) {
+    digitalWrite(bedBLights, HIGH);
+    EEPROM.write(11, 1);
+  } else if (EEPROM.read(11) == 1) {
+    digitalWrite(bedBLights, LOW);
+    EEPROM.write(11, 2);
+  }
+}
+void bedBLightsOff() {
+  digitalWrite(bedBLights, LOW);
+  EEPROM.write(11, 2);
+}
+void bedGLightsOn() {
+  if (EEPROM.read(12) == 2) {
+    digitalWrite(bedGLights, HIGH);
+    EEPROM.write(12, 1);
+  } else if (EEPROM.read(12) == 1) {
+    digitalWrite(bedGLights, LOW);
+    EEPROM.write(12, 2);
+  }
+}
+void bedGLightsOff() {
+  digitalWrite(bedGLights, LOW);
+  EEPROM.write(12, 2);
+}
+void backyardLightsOn() {
+  if (EEPROM.read(9) == 2) {
+    digitalWrite(backyardLights, HIGH);
+    EEPROM.write(9, 1);
+  } else if (EEPROM.read(9) == 1) {
+    digitalWrite(backyardLights, LOW);
+    EEPROM.write(9, 2);
+  }
+}
+void backyardLightsOff() {
+  digitalWrite(backyardLights, LOW);
+  EEPROM.write(9, 2);
+}
+void livingLightsOn() {
+  if (EEPROM.read(5) == 2) {
+    digitalWrite(livingLights, HIGH);
+    EEPROM.write(5, 1);
+  } else if (EEPROM.read(5) == 1) {
+    digitalWrite(livingLights, LOW);
+    EEPROM.write(5, 2);
+  }
+}
+void livingLightsOff() {
+  digitalWrite(livingLights, LOW);
+  EEPROM.write(5, 2);
+}
+void masterBedLightsOn() {
+  if (EEPROM.read(10) == 2) {
+    digitalWrite(masterBedLights, HIGH);
+    EEPROM.write(10, 1);
+  } else if (EEPROM.read(10) == 1) {
+    digitalWrite(masterBedLights, LOW);
+    EEPROM.write(10, 2);
+  }
+}
+void masterBedLightsOff() {
+  digitalWrite(masterBedLights, LOW);
+  EEPROM.write(10, 2);
+}
+void storeLightsOn() {
+  if (EEPROM.read(6) == 2) {
+    digitalWrite(storeLights, HIGH);
+    EEPROM.write(6, 1);
+  } else if (EEPROM.read(6) == 1) {
+    digitalWrite(storeLights, LOW);
+    EEPROM.write(6, 2);
+  }
+}
+void storeLightsOff() {
+  digitalWrite(storeLights, LOW);
+  EEPROM.write(6, 2);
+}
+void verandahLightsOn() {
+  if (EEPROM.read(7) == 2) {
+    digitalWrite(verandahLights, HIGH);
+    EEPROM.write(7, 1);
+  } else if (EEPROM.read(7) == 1) {
+    digitalWrite(verandahLights, LOW);
+    EEPROM.write(7, 2);
+  }
+}
+void verandahLightsOff() {
+  digitalWrite(verandahLights, LOW);
+  EEPROM.write(7, 2);
+}
+void garageLightsOn() {
+  if (EEPROM.read(4) == 2) {
+    digitalWrite(garageLights, HIGH);
+    EEPROM.write(4, 1);
+  } else if (EEPROM.read(4) == 1) {
+    digitalWrite(garageLights, LOW);
+    EEPROM.write(4, 2);
+  }
+}
+void garageLightsOff() {
+  digitalWrite(garageLights, LOW);
+  EEPROM.write(4, 2);
+}
+void kitchenLightsOn() {
+  if (EEPROM.read(8) == 2) {
+    digitalWrite(kitchenLights, HIGH);
+    EEPROM.write(8, 1);
+  } else if (EEPROM.read(8) == 1) {
+    digitalWrite(kitchenLights, LOW);
+    EEPROM.write(8, 2);
+  }
+}
+void kitchenLightsOff() {
+  digitalWrite(kitchenLights, LOW);
+  EEPROM.write(8, 2);
+}
+void doorLightsOn() {
+  if (EEPROM.read(3) == 2) {
+    digitalWrite(doorLights, HIGH);
+    EEPROM.write(3, 1);
+  } else if (EEPROM.read(3) == 1) {
+    digitalWrite(doorLights, LOW);
+    EEPROM.write(3, 2);
+  }
+}
+void doorLightsOff() {
+  digitalWrite(doorLights, LOW);
+  EEPROM.write(3, 2);
+}
+void gateLightsOn() {
+  if (EEPROM.read(1) == 2) {
+    digitalWrite(floodLights, HIGH);
+    EEPROM.write(1, 1);
+  } else if (EEPROM.read(1) == 1) {
+    digitalWrite(floodLights, LOW);
+    EEPROM.write(1, 2);
+  }
+}
+void gateLightsOff() {
+  digitalWrite(floodLights, LOW);
+  EEPROM.write(1, 2);
+}
+void toggleWin1() {
+
+  if (EEPROM.read(17) == 1) {
+    win1.write(0);
+    delay(200);
+    EEPROM.write(17, 2);
+  } else if (EEPROM.read(17) == 2) {
+    win1.write(180);
+    delay(20000);
+    EEPROM.write(17, 1);
+  }
+  win1.write(90);
+}
+void toggleWin2() {
+  if (EEPROM.read(18) == 1) {
+    win2.write(0);
+    delay(20000);
+    EEPROM.write(18, 2);
+  } else if (EEPROM.read(18) == 2) {
+    win2.write(180);
+    delay(20000);
+    EEPROM.write(18, 1);
+  }
+  win2.write(90);
+}
+void toggleWin3() {
+  if (EEPROM.read(19) == 1) {
+    win3.write(0);
+    delay(20000);
+    EEPROM.write(19, 2);
+  } else if (EEPROM.read(19) == 2) {
+    win3.write(180);
+    delay(20000);
+    EEPROM.write(19, 1);
+  }
+  win3.write(90);
+}
+void toggleWin4() {
+  if (EEPROM.read(20) == 1) {
+    win4.write(0);
+    delay(20000);
+    EEPROM.write(20, 2);
+  } else  if (EEPROM.read(20) == 2) {
+    win4.write(180);
+    delay(20000);
+    EEPROM.write(20, 1);
+    win4.write(90);
+  }
+}
+void danger() {
+  if (EEPROM.read(14) == 2) {
+    EEPROM.write(13, 2);
+    openGate();
+    toggleDoor();
+    EEPROM.write(17, 2);
+    EEPROM.write(18, 2);
+    EEPROM.write(19, 2);
+    EEPROM.write(20, 2);
+    delay(200);
+    toggleWin1();
+    toggleWin2();
+    toggleWin3();
+    toggleWin4();
+    EEPROM.write(14, 1);
+    delay(3600000);
+  } else if (EEPROM.read(14) == 1) {
+    CSD();
+    EEPROM.write(14, 2);
+  }
+
+  //Turn on some siren
+}
+void CSD() {
+  EEPROM.write(13, 1);
+  closeGate();
+  toggleDoor();
+  EEPROM.write(17, 1);
+  EEPROM.write(18, 1);
+  EEPROM.write(19, 1);
+  EEPROM.write(20, 1);
+  delay(200);
+  toggleWin1();
+  toggleWin2();
+  toggleWin3();
+  toggleWin4();
+  delay(3000);
+}
+void stopGate() {
+  digitalWrite(dcMotorClock, HIGH);
+  digitalWrite(dcMotorAnti, HIGH);
+  analogWrite(dcMotorSpeed, 0);
+  delay(2000);
+  EEPROM.write(2, 1);
+}
+void closeGate() {
+  if (EEPROM.read(0) == 1 || EEPROM.read(2) == 1) {
+    digitalWrite(gateStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    digitalWrite(gateStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    digitalWrite(gateStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+
+    digitalWrite(dcMotorClock, HIGH);
+    digitalWrite(dcMotorAnti, LOW);
+    analogWrite(dcMotorSpeed, 255);
+    delay(30000);
+    digitalWrite(dcMotorClock, HIGH);
+    digitalWrite(dcMotorAnti, HIGH);
+    analogWrite(dcMotorSpeed, 0);
+    delay(2000);
+    myservo.write(0);
+    delay(3000);
+    EEPROM.write(0, 2);
+    activated = 0;
+    character = 0;
+    Str[6] = '-';
+    Str[7] = '*';
+    Str[8] = '*';
+    Str[9] = '*';
+    Str[10] = ' ';
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("    PASSWORD");
+    lcd.setCursor(0, 1);
+    lcd.print(Str);
+  } else if (EEPROM.read(0) == 2) {
+    lcd.clear();
+    lcd.setCursor(3, 0);
+    lcd.print("GATE ALREADY CLOSED");
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(500);
+  }
+}
+void toggleDoor() {
+  if (EEPROM.read(13) == 1) {
+    digitalWrite(doorStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(doorStatusLed, LOW);
+    delay(1000);
+    digitalWrite(doorStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(doorStatusLed, LOW);
+    delay(1000);
+    digitalWrite(doorStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    myDoorServo.write(180);
+    EEPROM.write(13, 2);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("  DOOR OPEN");
+    activated = 2;
+
+    lcd.clear();
+    lcd.setCursor(4, 0);
+    lcd.print("WELLCOME");
+
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(3, 0);
+    lcd.print("DOOR  CLOSED");
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(500);
+  }
+  else if (EEPROM.read(13) == 2) {
+    digitalWrite(doorStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(doorStatusLed, LOW);
+    delay(1000);
+    digitalWrite(doorStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(doorStatusLed, LOW);
+    delay(1000);
+    digitalWrite(doorStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    myDoorServo.write(180);
+    EEPROM.write(13, 1);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("  DOOR OPEN");
+    activated = 2;
+
+    lcd.clear();
+    lcd.setCursor(4, 0);
+    lcd.print("WELLCOME");
+
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(3, 0);
+    lcd.print("DOOR  OPEN");
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(500);
+  }
+}
+void openGate() {
+  if (EEPROM.read(0) == 2 || EEPROM.read(2) == 1) {
+    digitalWrite(gateStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    digitalWrite(gateStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    digitalWrite(gateStatusLed, HIGH);
+    delay(1000);
+    digitalWrite(gateStatusLed, LOW);
+    delay(1000);
+    myservo.write(180);
+    delay(200);
+    EEPROM.write(0, 1);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("  ANDROID OPEN");
+    activated = 2;
+
+    lcd.clear();
+    lcd.setCursor(4, 0);
+    lcd.print("WELLCOME");
+
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(5000);
+
+    digitalWrite(dcMotorClock, LOW);
+    digitalWrite(dcMotorAnti, HIGH);
+    analogWrite(dcMotorSpeed, 255);
+    delay(30000);
+    digitalWrite(dcMotorClock, HIGH);
+    digitalWrite(dcMotorAnti, HIGH);
+    analogWrite(dcMotorSpeed, 0);
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(3, 0);
+    lcd.print("GATE  OPEN");
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(500);
+  }
+  else if (EEPROM.read(0) == 1) {
+    lcd.clear();
+    lcd.setCursor(3, 0);
+    lcd.print("GATE ALREADY OPEN");
+    lcd.setCursor(2, 1);
+    lcd.print("SMART HOME");
+    delay(500);
+  }
+}
+void SetSTATE(void) {
+  if (StrContains(HTTP_req, "GATECAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "GATECAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "DOORCAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "DOORCAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "LIVINGCAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "LIVINGCAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "KITCHENCAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "KITCHENCAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "STORECAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "STORECAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "VERANDAHCAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "VERANDAHCAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "GARAGECAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "GARAGECAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "BACKYARDCAM=1")) {
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+  }
+  else if (StrContains(HTTP_req, "BACKYARDCAM=0")) {
+    ///////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "GATELIGHTS=1")) {
+    gateLightsOn();
+  }
+  else if (StrContains(HTTP_req, "GATELIGHTS=0")) {
+    gateLightsOn();
+  }
+  if (StrContains(HTTP_req, "DOORLIGHTS=1")) {
+    doorLightsOn();
+  }
+  else if (StrContains(HTTP_req, "DOORLIGHTS=0")) {
+    doorLightsOn();
+  }
+  if (StrContains(HTTP_req, "VERANDAHLIGHTS=1")) {
+    verandahLightsOn();
+  }
+  else if (StrContains(HTTP_req, "VERANDAHLIGHTS=0")) {
+    verandahLightsOn();
+  }
+  if (StrContains(HTTP_req, "KITCHENLIGHTS=1")) {
+    kitchenLightsOn();
+  }
+  else if (StrContains(HTTP_req, "KITCHENLIGHTS=0")) {
+    kitchenLightsOn();
+  }
+  if (StrContains(HTTP_req, "STORELIGHTS=1")) {
+    storeLightsOn();
+  }
+  else if (StrContains(HTTP_req, "STORELIGHTS=0")) {
+    storeLightsOn();
+  }
+  if (StrContains(HTTP_req, "LIVINGLIGHTS=1")) {
+    livingLightsOn();
+  }
+  else if (StrContains(HTTP_req, "LIVINGLIGHTS=0")) {
+    livingLightsOn();
+  }
+  if (StrContains(HTTP_req, "GARAGELIGHTS=1")) {
+    garageLightsOn();
+  }
+  else if (StrContains(HTTP_req, "GARAGELIGHTS=0")) {
+    garageLightsOn();
+  }
+  if (StrContains(HTTP_req, "BACKYARDLIGHTS=1")) {
+    backyardLightsOn();
+  }
+  else if (StrContains(HTTP_req, "BACKYARDLIGHTS=0")) {
+    backyardLightsOn();
+  }
+  if (StrContains(HTTP_req, "MASTERBEDLIGHTS=1")) {
+    masterBedLightsOn();
+  }
+  else if (StrContains(HTTP_req, "MASTERBEDLIGHTS=0")) {
+    masterBedLightsOn();
+  }
+  if (StrContains(HTTP_req, "BED1LIGHTS=1")) {
+    bedBLightsOn();
+  }
+  else if (StrContains(HTTP_req, "BED1LIGHTS=0")) {
+    bedBLightsOn();
+  }
+  if (StrContains(HTTP_req, "BED2LIGHTS=1")) {
+    bedGLightsOn();
+  }
+  else if (StrContains(HTTP_req, "BED2LIGHTS=0")) {
+    bedGLightsOn();
+  }
+  if (StrContains(HTTP_req, "MAINDOOR=1")) {
+    toggleDoor();
+  }
+  else if (StrContains(HTTP_req, "MAINDOOR=0")) {
+    toggleDoor();
+  }
+  if (StrContains(HTTP_req, "GATE=1")) {
+    openGate();
+  }
+  else if (StrContains(HTTP_req, "GATE=0")) {
+    closeGate();
+  }
+  if (StrContains(HTTP_req, "WINDOW1=1")) {
+    toggleWin1();
+  }
+  else if (StrContains(HTTP_req, "WINDOW1=0")) {
+    toggleWin1();
+  }
+  if (StrContains(HTTP_req, "WINDOW2=1")) {
+    toggleWin2();
+  }
+  else if (StrContains(HTTP_req, "WINDOW2=0")) {
+    toggleWin2();
+  }
+  if (StrContains(HTTP_req, "WINDOW3=1")) {
+    toggleWin3();
+  }
+  else if (StrContains(HTTP_req, "WINDOW3=0")) {
+    toggleWin3();
+  }
+  if (StrContains(HTTP_req, "WINDOW4=1")) {
+    toggleWin4();
+  }
+  else if (StrContains(HTTP_req, "WINDOW4=0")) {
+    toggleWin4();
+  }
+  if (StrContains(HTTP_req, "PAUSE=1")) {
+    stopGate();
+  }
+  else if (StrContains(HTTP_req, "PAUSE=0")) {
+    /////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////
+  }
+  if (StrContains(HTTP_req, "EMERGENCY=1")) {
+    danger();
+  }
+  else if (StrContains(HTTP_req, "EMERGENCY=0")) {
+    danger();
+  }
+  if (StrContains(HTTP_req, "CSD=1")) {
+    CSD();
+  }
+  else if (StrContains(HTTP_req, "CSD=0")) {
+    CSD();
+  }
+}
+void XML_response(EthernetClient cl)
+{
+  int analog_val;            // stores value read from analog inputs
+  int count;                 // used by 'for' loops
+  int sw_arr[] = {2, 3};  // pins interfaced to switches
+
+  cl.print("<?xml version = \"1.0\" ?>");
+  cl.print("<inputs>");
+  cl.print("<GATECAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</GATECAM");
+  cl.print("<DOORCAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</DOORCAM");
+  cl.print("<LIVINGCAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</LIVINGCAM");
+  cl.print("<KITCHENCAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</KITCHENCAM");
+  cl.print("<STORECAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</STORECAM");
+  cl.print("<VERANDAHCAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</VERANDAHCAM");
+  cl.print("<GARAGECAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</GARAGECAM");
+  cl.print("<BACKYARDCAM>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("live");
+  }
+  else {
+    cl.print("off");
+  }
+  cl.println("</BACKYARDCAM");
+  cl.print("</inputs>");
+
+  cl.print("<GATELIGHTS>");
+  if (EEPROM.read(1) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(1) == 1) {
+    cl.print("off");
+  }
+  cl.println("</GATELIGHTS");
+  cl.print("<DOORLIGHTS>");
+  if (EEPROM.read(3) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(3) == 1) {
+    cl.print("off");
+  }
+  cl.println("</DOORLIGHTS");
+  cl.print("<LIVINGLIGHTS>");
+  if (EEPROM.read(5) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(5) == 1) {
+    cl.print("off");
+  }
+  cl.println("</LIVINGLIGHTS");
+  cl.print("<KITCHENLIGHTS>");
+  if (EEPROM.read(8) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(8) == 1) {
+    cl.print("off");
+  }
+  cl.println("</KITCHENLIGHTS");
+  cl.print("<STORELIGHTS>");
+  if (EEPROM.read(6) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(6) == 1) {
+    cl.print("off");
+  }
+  cl.println("</STORELIGHTS");
+  cl.print("<GARAGELIGHTS>");
+  if (EEPROM.read(4) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(4) == 1) {
+    cl.print("off");
+  }
+  cl.println("</GARAGELIGHTS");
+  cl.print("<VERANDAHLIGHTS>");
+  if (EEPROM.read(7) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(7) == 2) {
+    cl.print("off");
+  }
+  cl.println("</VERANDAHLIGHTS");
+  cl.print("<BACKYARDLIGHTS>");
+  if (EEPROM.read(9) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(9) == 1) {
+    cl.print("off");
+  }
+  cl.println("</BACKYARDLIGHTS");
+  cl.print("<MASTERBEDLIGHTS>");
+  if (EEPROM.read(10) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(10) == 1) {
+    cl.print("off");
+  }
+  cl.println("</MASTERBEDLIGHTS");
+  cl.print("<BED1LIGHTS>");
+  if (EEPROM.read(11) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(11) == 1) {
+    cl.print("off");
+  }
+  cl.println("</BED1LIGHTS");
+  cl.print("<BED2LIGHTS>");
+  if (EEPROM.read(12) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(12) == 1) {
+    cl.print("off");
+  }
+  cl.println("</BED2LIGHTS");
+  cl.print("<GATESTATUS>");
+  if (EEPROM.read(0) == 1 || EEPROM.read(2) == 1) {
+    cl.print("open");
+  }
+  else if (EEPROM.read(0) == 2 || EEPROM.read(2) == 2) {
+    cl.print("closed");
+  }
+  cl.println("</GATESTATUS");
+  cl.print("<MAINDOORLIGHTS>");
+  if (EEPROM.read(3) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(3) == 1) {
+    cl.print("off");
+  }
+  cl.println("</MAINDOORLIGHTS");
+  cl.print("<WINDOW1>");
+  if (EEPROM.read(17) == 2) {
+    cl.print("open");
+  }
+  else if (EEPROM.read(17) == 1) {
+    cl.print("closed");
+  }
+  cl.println("</WINDOW1");
+  cl.print("<WINDOW2>");
+  if (EEPROM.read(18) == 2) {
+    cl.print("open");
+  }
+  else if (EEPROM.read(18) == 1) {
+    cl.print("closed");
+  }
+  cl.println("</WINDOW2");
+  cl.print("<WINDOW3>");
+  if (EEPROM.read(19) == 2) {
+    cl.print("open");
+  }
+  else if (EEPROM.read(19) == 1) {
+    cl.print("closed");
+  }
+  cl.println("</WINDOW3");
+  cl.print("<WINDOW4>");
+  if (EEPROM.read(20) == 2) {
+    cl.print("open");
+  }
+  else if (EEPROM.read(20) == 1) {
+    cl.print("closed");
+  }
+  cl.println("</WINDOW4");
+  cl.print("<PAUSE>");
+  if (EEPROM.read(2) == 2) {
+    cl.print("paused");
+  }
+  else if (EEPROM.read(2) == 1) {
+    cl.print("free");
+  }
+  cl.println("</PAUSE");
+  cl.print("<EMERGENCY>");
+  if (EEPROM.read(14) == 2) {
+    cl.print("on");
+  }
+  else if (EEPROM.read(14) == 1) {
+    cl.print("off");
+  }
+  cl.println("</EMERGENCY");
+  cl.print("<CSD>");
+  if (EEPROM.read(13) == 2) {
+    cl.print("csdon");
+  }
+  else if (EEPROM.read(13) == 1) {
+    cl.print("csdoff");
+  }
+  cl.println("</CSD");
+}
+
+// sets every element of str to 0 (clears array)
+void StrClear(char *str, char length)
+{
+  for (int i = 0; i < length; i++) {
+    str[i] = 0;
+  }
+}
+
+// searches for the string sfind in the string str
+// returns 1 if string found
+// returns 0 if string not found
+char StrContains(char *str, char *sfind)
+{
+  char found = 0;
+  char index = 0;
+  char len;
+
+  len = strlen(str);
+
+  if (strlen(sfind) > len) {
+    return 0;
+  }
+  while (index < len) {
+    if (str[index] == sfind[found]) {
+      found++;
+      if (strlen(sfind) == found) {
+        return 1;
+      }
+    }
+    else {
+      found = 0;
+    }
+    index++;
+  }
+
+  return 0;
+}
+void loop() {
+  EthernetClient client = server.available();  // try to get client
+
+  if (client) {  // got client?
+    boolean currentLineIsBlank = true;
+    while (client.connected()) {
+      if (client.available()) {   // client data available to read
+        char c = client.read(); // read 1 byte (character) from client
+        // limit the size of the stored received HTTP request
+        // buffer first part of HTTP request in HTTP_req array (string)
+        // leave last element in array as 0 to null terminate string (REQ_BUF_SZ - 1)
+        if (req_index < (REQ_BUF_SZ - 1)) {
+          HTTP_req[req_index] = c;          // save HTTP request character
+          req_index++;
+        }
+        // last line of client request is blank and ends with \n
+        // respond to client only after last line received
+        if (c == '\n' && currentLineIsBlank) {
+          // send a standard http response header
+          client.println("HTTP/1.1 200 OK");
+          // remainder of header follows below, depending on if
+          // web page or XML page is requested
+          // Ajax request - send XML file
+          if (StrContains(HTTP_req, "ajax_inputs")) {
+            // send rest of HTTP header
+            client.println("Content-Type: text/xml");
+            client.println("Connection: keep-alive");
+            client.println();
+            SetSTATE();
+            // send XML file containing input states
+            XML_response(client);
+          }
+          else {  // web page request
+            // send rest of HTTP header
+            client.println("Content-Type: text/html");
+            client.println("Connection: keep-alive");
+            client.println();
+            // send web page
+            webFile = SD.open("smartHome.html");        // open web page file
+            if (webFile) {
+              while (webFile.available()) {
+                client.write(webFile.read()); // send web page to client
+              }
+              webFile.close();
+            }
+          }
+          // display received HTTP request on serial port
+          Serial.print(HTTP_req);
+          // reset buffer index and all buffer elements to 0
+          req_index = 0;
+          StrClear(HTTP_req, REQ_BUF_SZ);
+          break;
+        }
+        // every line of text received from the client ends with \r\n
+        if (c == '\n') {
+          // last character on line of received text
+          // starting new line with next character read
+          currentLineIsBlank = true;
+        }
+        else if (c != '\r') {
+          // a text character was received from client
+          currentLineIsBlank = false;
+        }
+      } // end if (client.available())
+    } // end while (client.connected())
+    delay(1);      // give the web browser time to receive the data
+    client.stop(); // close the connection
+  } // end if (client)
+
+  //controls the Arduino if you press the buttons
+
+
+
+  ///////////////Android OPEN/CLOSE/////////
+  if (Serial.available() > 0)
+  {
+    char Received = Serial.read();
+    if (Received == 'z') {
+      danger();
+      CSD();
+    }
+    if (Received == 'l') {
+      gateLightsOn();
+    }
+    if (Received == 'd') {
+      doorLightsOn();
+    }
+    if (Received == 'k') {
+      kitchenLightsOn();
+    }
+    if (Received == 'v') {
+      verandahLightsOn();
+    }
+    if (Received == 's') {
+      livingLightsOn();
+    }
+    if (Received == 'y') {
+      backyardLightsOn();
+    }
+    if (Received == 'm') {
+      masterBedLightsOn();
+    }
+    if (Received == 'g') {
+      garageLightsOn();
+    }
+    if (Received == 'b') {
+      bedBLightsOn();
+    }
+    if (Received == 'f') {
+      bedGLightsOn();
+    }
+    if (Received == 't') {
+      storeLightsOn();
+    }
+    if (Received == 'x')
+    {
+      toggleDoor();
+    }
+    if (Received == 'c')
+    {
+      closeGate();
+    }
+    if (Received == 'p') {
+      stopGate();
+    }
+    if (Received == 'o')
+    {
+      openGate();
+    }
+    if (Received == 'a') {
+      toggleWin1();
+    }
+    if (Received == 'h') {
+      toggleWin2();
+    }
+    if (Received == 'i') {
+      toggleWin3();
+    }
+    if (Received == 'j') {
+      toggleWin4();
+    }
+  }
+  //////////////////LIGHTS//////////////////
+  gateLightsButState = digitalRead(gateLightsBut);
+  if (gateLightsButState == HIGH) {
+    gateLightsOn();
+  } else {
+    gateLightsOff();
+  }
+  doorLightsButState = digitalRead(doorLightsBut);
+  if (doorLightsButState == HIGH) {
+    doorLightsOn();
+  } else  {
+    doorLightsOff();
+  }
+  kitchenLightsButState = digitalRead(kitchenLightsBut);
+  if (kitchenLightsButState == HIGH) {
+    kitchenLightsOn();
+  } else {
+    kitchenLightsOff();
+  }
+  garageLightsButState = digitalRead(garageLightsBut);
+  if (garageLightsButState == HIGH) {
+    garageLightsOn();
+  } else {
+    garageLightsOff();
+  }
+  livingLightsButState = digitalRead(livingLightsBut);
+  if (livingLightsButState == HIGH) {
+    livingLightsOn();
+  } else {
+    livingLightsOff();
+  }
+  storeLightsButState = digitalRead(storeLightsBut);
+  if (storeLightsButState == HIGH) {
+    storeLightsOn();
+  } else {
+    storeLightsOff();
+  }
+  backyardLightsButState = digitalRead(backyardLightsBut);
+  if (backyardLightsButState == HIGH) {
+    backyardLightsOn();
+  } else {
+    backyardLightsOff();
+  }
+  verandahLightsButState = digitalRead(verandahLightsBut);
+  if (verandahLightsButState == HIGH) {
+    verandahLightsOn();
+  } else {
+    verandahLightsOff();
+  }
+  masterBedLightsButState = digitalRead(masterBedLightsBut);
+  if (masterBedLightsButState == HIGH) {
+    masterBedLightsOn();
+  } else {
+    masterBedLightsOff();
+  }
+  bedBLightsButState = digitalRead(bedBLightsBut);
+  if (bedBLightsButState == HIGH) {
+    bedBLightsOn();
+  } else {
+    bedBLightsOff();
+  }
+  bedGLightsButState = digitalRead(bedGLightsBut);
+  if (bedGLightsButState == HIGH) {
+    bedGLightsOn();
+  } else {
+    bedGLightsOff();
+  }
+  ///////////////BUTTON/SWITCH CONTROLS/////////
+  dangerButState = digitalRead(dangerBut);
+  if (dangerButState == HIGH) {
+    danger();
+    CSD();
+  }
+  dangerButState == LOW;
+  emergeButState = digitalRead(emergeBut);
+  if (emergeButState == HIGH) {
+    openGate();
+  }
+  pauseButState = digitalRead(pause);
+  if (pauseButState == HIGH) {
+    stopGate();
+  }
+  pauseButState = LOW;
+  ///////////////KEYPAD OPEN/CLOSE////////////
+  char customKey = customKeypad.getKey(); //this function reads the presed key
+
+  if (customKey) {
+    if (character == 0)
+    {
+      Serial.println(customKey);
+
+      Str[6] = customKey;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("    PASSWORD");
+      lcd.setCursor(0, 1);
+      lcd.print(Str);
+    }
+    if (character == 1)
+    {
+      Serial.println(customKey);
+      Str[7] = customKey;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("    PASSWORD");
+      lcd.setCursor(0, 1);
+      lcd.print(Str);
+    }
+    if (character == 2)
+    {
+      Serial.println(customKey);
+      Str[8] = customKey;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("    PASSWORD");
+      lcd.setCursor(0, 1);
+      lcd.print(Str);
+    }
+    if (character == 3)
+    {
+      Serial.println(customKey);
+      Str[9] = customKey;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("    PASSWORD");
+      lcd.setCursor(0, 1);
+      lcd.print(Str);
+    }
+    if (character == 4)
+    {
+      Serial.println(customKey);
+      Str[10] = customKey;
+      activated = 1;
+    }
+    character = character + 1;
+    delay(100);
+  }
+  if (activated == 1)
+  { if (Str[10] = 'A' && character == 5 && Str[6] == '3' && Str[7] == '0' && Str[8] == '0' && Str[9] == '8' )
+    {
+      EEPROM.write(13, 1);
+      toggleDoor();
+    }
+    else
+    {
+      lcd.clear();
+      lcd.setCursor(1, 0);
+      lcd.print("PASSWORD ERROR");
+      lcd.setCursor(3, 1);
+      lcd.print("TRY  AGAIN");
+      delay(3000);
+      character = 0;
+      Str[6] = '-';
+      Str[7] = '*';
+      Str[8] = '*';
+      Str[9] = '*';
+      Str[10] = ' ';
+      activated = 0;
+      lcd.clear();
+      lcd.setCursor(4, 0);
+      lcd.print("PASSWORD");
+      lcd.setCursor(0, 1);
+      lcd.print(Str);
+    }
+    if (Str[10] = 'A' && character == 5 && Str[6] == '3' && Str[7] == '0' && Str[8] == '0' && Str[9] == '7' )
+    {
+      EEPROM.write(13, 2);
+      toggleDoor();
+    }
+    else
+    {
+      lcd.clear();
+      lcd.setCursor(1, 0);
+      lcd.print("PASSWORD ERROR");
+      lcd.setCursor(3, 1);
+      lcd.print("TRY  AGAIN");
+      delay(3000);
+      character = 0;
+      Str[6] = '-';
+      Str[7] = '*';
+      Str[8] = '*';
+      Str[9] = '*';
+      Str[10] = ' ';
+      activated = 0;
+      lcd.clear();
+      lcd.setCursor(4, 0);
+      lcd.print("PASSWORD");
+      lcd.setCursor(0, 1);
+      lcd.print(Str);
+    }
+  }
+  if (activated == 2)
+  {
+    if (customKey == 'C' )
+    {
+      closeGate();
+    } else if (customKey == 'D') {
+      stopGate();
+    }
+    else if (customKey == 'B') {
+      openGate();
+    }
+  }
+}
